@@ -33,15 +33,22 @@ test("server-renders the AIRCAN experience and social metadata", async () => {
 });
 
 test("ships the local hand model and removes the disposable starter", async () => {
-  const [page, layout, packageJson] = await Promise.all([
+  const [page, worker, layout, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../public/gesture-worker.js", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     access(new URL("../public/models/gesture_recognizer.task", import.meta.url)),
     access(new URL("../public/og.png", import.meta.url)),
   ]);
 
-  assert.match(page, /GestureRecognizer\.createFromOptions/);
+  assert.match(worker, /GestureRecognizer\.createFromOptions/);
+  assert.match(worker, /recognizeForVideo/);
+  assert.match(page, /gesture-worker\.js/);
+  assert.match(page, /CALIBRATION_TARGETS/);
+  assert.match(page, /TRACKING LAB/);
+  assert.match(page, /Splatter/);
+  assert.match(page, /Marker/);
   assert.match(page, /getUserMedia/);
   assert.match(page, /saveArtwork/);
   assert.match(layout, /generateMetadata/);

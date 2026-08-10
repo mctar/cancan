@@ -10,10 +10,12 @@ type GestureResult = {
   landmarks: Landmark[][];
   gestures: { categoryName: string; score: number }[][];
 };
-type Recognizer = {
-  recognizeForVideo: (video: HTMLVideoElement, timestamp: number) => GestureResult;
-  close: () => void;
+type WorkerResult = GestureResult & {
+  type: "result";
+  capturedAt: number;
+  inferenceMs: number;
 };
+type CalibrationBounds = { minX: number; maxX: number; minY: number; maxY: number };
 type AudioRig = {
   context: AudioContext;
   source: AudioBufferSourceNode;
@@ -30,6 +32,13 @@ type Drip = {
   color: string;
   alpha: number;
 };
+type MistParticle = Point & {
+  vx: number;
+  vy: number;
+  life: number;
+  size: number;
+  color: string;
+};
 
 const PALETTE = [
   { name: "Voltage", hex: "#dfff00" },
@@ -41,9 +50,18 @@ const PALETTE = [
 ];
 
 const CAPS = [
-  { id: "skinny", label: "01", name: "Skinny", size: 22, flow: 14 },
-  { id: "classic", label: "02", name: "Classic", size: 44, flow: 25 },
-  { id: "fat", label: "03", name: "Fat cap", size: 78, flow: 40 },
+  { id: "skinny", label: "01", name: "Skinny", size: 20, flow: 15, kind: "aerosol" },
+  { id: "classic", label: "02", name: "Classic", size: 44, flow: 27, kind: "aerosol" },
+  { id: "fat", label: "03", name: "Fat cap", size: 82, flow: 42, kind: "aerosol" },
+  { id: "splatter", label: "04", name: "Splatter", size: 66, flow: 19, kind: "splatter" },
+  { id: "marker", label: "05", name: "Marker", size: 18, flow: 9, kind: "marker" },
+];
+
+const CALIBRATION_TARGETS = [
+  { label: "TOP LEFT", x: 0.12, y: 0.18 },
+  { label: "TOP RIGHT", x: 0.88, y: 0.18 },
+  { label: "BOTTOM RIGHT", x: 0.88, y: 0.78 },
+  { label: "BOTTOM LEFT", x: 0.12, y: 0.78 },
 ];
 
 const clamp = (value: number, min = 0, max = 1) =>
@@ -73,18 +91,32 @@ export default function Home() {
   const [canUndo, setCanUndo] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [toast, setToast] = useState("");
+  const [calibrationStage, setCalibrationStage] = useState(0);
+  const [telemetry, setTelemetry] = useState({
+    trackingFps: 0,
+    renderFps: 0,
+    latencyMs: 0,
+    inferenceMs: 0,
+    confidence: 0,
+    delegate: "—",
+  });
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const effectsCanvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const debugCanvasRef = useRef<HTMLCanvasElement>(null);
   const modeRef = useRef<Mode>("intro");
-  const recognizerRef = useRef<Recognizer | null>(null);
+  const workerRef = useRef<Worker | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const trackingRafRef = useRef<number | null>(null);
   const paintRafRef = useRef<number | null>(null);
+  const frameInFlightRef = useRef(false);
   const pointerRef = useRef<Point>({ x: 0, y: 0 });
+  const smoothedPointRef = useRef<Point | null>(null);
+  const velocityRef = useRef<Point>({ x: 0, y: 0 });
   const lastPaintPointRef = useRef<Point | null>(null);
   const pointerVisibleRef = useRef(false);
+  const trackingPinchRef = useRef(false);
   const sprayingRef = useRef(false);
   const wasSprayingRef = useRef(false);
   const pressureRef = useRef(0.85);
@@ -93,11 +125,21 @@ export default function Home() {
   const lastInferenceRef = useRef(0);
   const lastVideoTimeRef = useRef(-1);
   const lastUiUpdateRef = useRef(0);
+  const lastTrackTimeRef = useRef(0);
+  const lastResultTimeRef = useRef(0);
+  const trackingFpsRef = useRef(0);
+  const renderFpsRef = useRef(0);
+  const renderFrameCountRef = useRef(0);
+  const renderSampleStartRef = useRef(0);
+  const calibrationSamplesRef = useRef<Point[]>([]);
+  const calibrationBoundsRef = useRef<CalibrationBounds>({ minX: 0.08, maxX: 0.92, minY: 0.07, maxY: 0.91 });
+  const calibrationPinchRef = useRef(false);
   const openPalmSinceRef = useRef(0);
   const thumbsUpSinceRef = useRef(0);
   const gestureCooldownRef = useRef(0);
   const wetnessRef = useRef(0);
   const dripsRef = useRef<Drip[]>([]);
+  const mistRef = useRef<MistParticle[]>([]);
   const historyRef = useRef<string[]>([]);
   const colorRef = useRef(color);
   const capRef = useRef(cap);
@@ -181,6 +223,14 @@ export default function Home() {
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (old.width > 0 && old.height > 0) {
       context.drawImage(old, 0, 0, old.width, old.height, 0, 0, width, height);
+    }
+    const effectsCanvas = effectsCanvasRef.current;
+    if (effectsCanvas) {
+      effectsCanvas.width = Math.floor(width * dpr);
+      effectsCanvas.height = Math.floor(height * dpr);
+      effectsCanvas.style.width = `${width}px`;
+      effectsCanvas.style.height = `${height}px`;
+      effectsCanvas.getContext("2d")?.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
   }, []);
 
@@ -311,25 +361,62 @@ export default function Home() {
     ) => {
       const paint = rgb(colorRef.current.hex);
       const selectedCap = capRef.current;
+      if (selectedCap.kind === "marker") {
+        const angle = Math.atan2(velocityRef.current.y, velocityRef.current.x || 0.001) + Math.PI * 0.5;
+        context.save();
+        context.translate(x, y);
+        context.rotate(angle);
+        context.beginPath();
+        context.fillStyle = `rgba(${paint.r},${paint.g},${paint.b},${0.58 + pressure * 0.34})`;
+        context.ellipse(0, 0, radius * 0.7, radius * 0.25, 0, 0, Math.PI * 2);
+        context.fill();
+        context.restore();
+        return;
+      }
+
+      const splatter = selectedCap.kind === "splatter";
       const count = Math.max(5, Math.floor(selectedCap.flow * pressure * amountScale));
       for (let i = 0; i < count; i += 1) {
         const theta = Math.random() * Math.PI * 2;
-        const spread = Math.min(1.35, Math.sqrt(-2 * Math.log(Math.max(0.001, Math.random()))) * 0.39);
+        const spread = splatter
+          ? 0.18 + Math.pow(Math.random(), 0.52) * 1.55
+          : Math.min(1.35, Math.sqrt(-2 * Math.log(Math.max(0.001, Math.random()))) * 0.39);
         const d = spread * radius;
         const dotX = x + Math.cos(theta) * d;
         const dotY = y + Math.sin(theta) * d;
         const centerWeight = 1 - clamp(d / (radius * 1.38));
-        const dotRadius = 0.35 + Math.random() * (1.1 + pressure * 1.65) + centerWeight * 0.9;
-        const alpha = (0.045 + centerWeight * 0.18) * pressure;
+        const dotRadius = splatter
+          ? 0.7 + Math.pow(Math.random(), 3) * 7.5
+          : 0.35 + Math.random() * (1.1 + pressure * 1.65) + centerWeight * 0.9;
+        const alpha = splatter
+          ? (0.18 + Math.random() * 0.48) * pressure
+          : (0.045 + centerWeight * 0.18) * pressure;
         context.beginPath();
         context.fillStyle = `rgba(${paint.r},${paint.g},${paint.b},${alpha})`;
         context.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
         context.fill();
       }
-      context.beginPath();
-      context.fillStyle = `rgba(${paint.r},${paint.g},${paint.b},${0.025 + pressure * 0.035})`;
-      context.arc(x, y, radius * 0.32, 0, Math.PI * 2);
-      context.fill();
+      if (!splatter) {
+        context.beginPath();
+        context.fillStyle = `rgba(${paint.r},${paint.g},${paint.b},${0.025 + pressure * 0.035})`;
+        context.arc(x, y, radius * 0.32, 0, Math.PI * 2);
+        context.fill();
+      }
+
+      if (mistRef.current.length < 240 && Math.random() < 0.72) {
+        const mistCount = splatter ? 1 : 2;
+        for (let i = 0; i < mistCount; i += 1) {
+          mistRef.current.push({
+            x: x + (Math.random() - 0.5) * radius,
+            y: y + (Math.random() - 0.5) * radius,
+            vx: (Math.random() - 0.5) * 22,
+            vy: -8 - Math.random() * 20,
+            life: 0.45 + Math.random() * 0.45,
+            size: 1 + Math.random() * 2.4,
+            color: colorRef.current.hex,
+          });
+        }
+      }
     },
     [],
   );
@@ -357,6 +444,15 @@ export default function Home() {
       const context = canvas?.getContext("2d");
       const dt = clamp((time - lastPaintTimeRef.current) / 1000, 0.002, 0.05);
       lastPaintTimeRef.current = time;
+      renderFrameCountRef.current += 1;
+      if (!renderSampleStartRef.current) renderSampleStartRef.current = time;
+      if (time - renderSampleStartRef.current >= 500) {
+        renderFpsRef.current = Math.round(
+          renderFrameCountRef.current / ((time - renderSampleStartRef.current) / 1000),
+        );
+        renderFrameCountRef.current = 0;
+        renderSampleStartRef.current = time;
+      }
 
       if (canvas && context && sprayingRef.current && pointerVisibleRef.current && modeRef.current === "paint") {
         const current = pointerRef.current;
@@ -370,6 +466,7 @@ export default function Home() {
         const speed = travel / dt;
         const radius = capRef.current.size * (0.82 + palmScaleRef.current * 0.65);
         const steps = Math.max(1, Math.min(12, Math.ceil(travel / Math.max(3, radius * 0.13))));
+        const density = clamp(1.28 - speed / 1250, 0.34, 1.18);
         for (let step = 1; step <= steps; step += 1) {
           const ratio = step / steps;
           deposit(
@@ -378,11 +475,11 @@ export default function Home() {
             last.y + (current.y - last.y) * ratio,
             radius,
             pressureRef.current,
-            Math.max(0.35, (dt * 60) / steps),
+            Math.max(0.28, ((dt * 60) / steps) * density),
           );
         }
         lastPaintPointRef.current = { ...current };
-        if (speed < 70) {
+        if (speed < 70 && capRef.current.kind === "aerosol") {
           wetnessRef.current += dt * pressureRef.current;
           if (wetnessRef.current > 0.78 && Math.random() < 0.055) {
             dripsRef.current.push({
@@ -424,6 +521,26 @@ export default function Home() {
             context.fill();
             return false;
           }
+          return true;
+        });
+      }
+
+      const effectsCanvas = effectsCanvasRef.current;
+      const effects = effectsCanvas?.getContext("2d");
+      if (effectsCanvas && effects) {
+        effects.clearRect(0, 0, window.innerWidth, window.innerHeight);
+        mistRef.current = mistRef.current.filter((particle) => {
+          particle.life -= dt;
+          if (particle.life <= 0) return false;
+          particle.x += particle.vx * dt;
+          particle.y += particle.vy * dt;
+          particle.vx *= 0.97;
+          particle.vy *= 0.97;
+          const paint = rgb(particle.color);
+          effects.beginPath();
+          effects.fillStyle = `rgba(${paint.r},${paint.g},${paint.b},${Math.min(0.24, particle.life * 0.28)})`;
+          effects.arc(particle.x, particle.y, particle.size * particle.life, 0, Math.PI * 2);
+          effects.fill();
           return true;
         });
       }
@@ -471,13 +588,169 @@ export default function Home() {
     });
   }, []);
 
+  const processTrackingResult = useCallback(
+    (result: WorkerResult) => {
+      const now = performance.now();
+      if (lastResultTimeRef.current) {
+        const instantFps = 1000 / Math.max(1, now - lastResultTimeRef.current);
+        trackingFpsRef.current = trackingFpsRef.current
+          ? trackingFpsRef.current * 0.82 + instantFps * 0.18
+          : instantFps;
+      }
+      lastResultTimeRef.current = now;
+      const landmarks = result.landmarks[0];
+
+      if (!landmarks) {
+        pointerVisibleRef.current = false;
+        trackingPinchRef.current = false;
+        calibrationPinchRef.current = false;
+        updateSpraying(false);
+        if (now - lastUiUpdateRef.current > 160) {
+          setCursor((previous) => ({ ...previous, visible: false }));
+          setTrackingLabel("HAND OUT OF FRAME");
+          setTelemetry((previous) => ({
+            ...previous,
+            trackingFps: Math.round(trackingFpsRef.current),
+            renderFps: renderFpsRef.current,
+            latencyMs: Math.round(now - result.capturedAt),
+            inferenceMs: Math.round(result.inferenceMs),
+            confidence: 0,
+          }));
+          lastUiUpdateRef.current = now;
+        }
+        return;
+      }
+
+      const tip = landmarks[8];
+      const thumb = landmarks[4];
+      const palm = Math.max(0.04, distance(landmarks[0], landmarks[9]));
+      const pinchRatio = distance(tip, thumb) / palm;
+      const nextPressure = clamp(1 - (pinchRatio - 0.1) / 0.36, 0.18, 1);
+      const pinching = trackingPinchRef.current ? pinchRatio < 0.48 : pinchRatio < 0.34;
+      trackingPinchRef.current = pinching;
+
+      const raw = { x: 1 - tip.x, y: tip.y };
+      const bounds = calibrationBoundsRef.current;
+      const normalizedX = clamp((raw.x - bounds.minX) / Math.max(0.2, bounds.maxX - bounds.minX));
+      const normalizedY = clamp((raw.y - bounds.minY) / Math.max(0.2, bounds.maxY - bounds.minY));
+      const target = {
+        x: normalizedX * window.innerWidth,
+        y: normalizedY * window.innerHeight,
+      };
+
+      const dt = clamp((now - (lastTrackTimeRef.current || now - 33)) / 1000, 0.008, 0.1);
+      lastTrackTimeRef.current = now;
+      const previous = smoothedPointRef.current ?? target;
+      const rawVelocity = {
+        x: (target.x - previous.x) / dt,
+        y: (target.y - previous.y) / dt,
+      };
+      velocityRef.current = {
+        x: velocityRef.current.x * 0.72 + rawVelocity.x * 0.28,
+        y: velocityRef.current.y * 0.72 + rawVelocity.y * 0.28,
+      };
+      const speed = Math.hypot(velocityRef.current.x, velocityRef.current.y);
+      const smoothing = clamp(0.2 + speed / 2600, 0.2, 0.52);
+      const smoothed = {
+        x: previous.x + (target.x - previous.x) * smoothing,
+        y: previous.y + (target.y - previous.y) * smoothing,
+      };
+      smoothedPointRef.current = smoothed;
+      const predictionSeconds = clamp(speed / 45000, 0.012, 0.034);
+      pointerRef.current = {
+        x: clamp(smoothed.x + velocityRef.current.x * predictionSeconds, 0, window.innerWidth),
+        y: clamp(smoothed.y + velocityRef.current.y * predictionSeconds, 0, window.innerHeight),
+      };
+      pointerVisibleRef.current = true;
+      palmScaleRef.current = clamp((palm - 0.13) / 0.18);
+      pressureRef.current = nextPressure;
+
+      const gesture = result.gestures[0]?.[0]?.categoryName ?? "None";
+      const gestureScore = result.gestures[0]?.[0]?.score ?? 0;
+
+      if (modeRef.current === "calibrate") {
+        const stage = calibrationSamplesRef.current.length;
+        setTrackingLabel(`PINCH ${CALIBRATION_TARGETS[stage]?.label ?? "TO FINISH"}`);
+        if (pinching && !calibrationPinchRef.current && stage < CALIBRATION_TARGETS.length) {
+          calibrationSamplesRef.current.push(raw);
+          const nextStage = calibrationSamplesRef.current.length;
+          setCalibrationStage(nextStage);
+          if (nextStage === CALIBRATION_TARGETS.length) {
+            const [topLeft, topRight, bottomRight, bottomLeft] = calibrationSamplesRef.current;
+            const left = (topLeft.x + bottomLeft.x) / 2;
+            const right = (topRight.x + bottomRight.x) / 2;
+            const top = (topLeft.y + topRight.y) / 2;
+            const bottom = (bottomLeft.y + bottomRight.y) / 2;
+            const xMin = Math.min(left, right);
+            const xMax = Math.max(left, right);
+            const yMin = Math.min(top, bottom);
+            const yMax = Math.max(top, bottom);
+            const xSpan = Math.max(0.22, xMax - xMin);
+            const ySpan = Math.max(0.22, yMax - yMin);
+            calibrationBoundsRef.current = {
+              minX: clamp(xMin - xSpan * (0.12 / 0.76), 0, 0.7),
+              maxX: clamp(xMax + xSpan * (0.12 / 0.76), 0.3, 1),
+              minY: clamp(yMin - ySpan * (0.18 / 0.6), 0, 0.7),
+              maxY: clamp(yMax + ySpan * (0.22 / 0.6), 0.3, 1),
+            };
+            smoothedPointRef.current = null;
+            setAppMode("paint");
+            showToast("CALIBRATED — THE WALL IS YOURS");
+          } else {
+            showToast(`${nextStage}/4 LOCKED`);
+          }
+        }
+        calibrationPinchRef.current = pinching;
+      } else if (modeRef.current === "paint") {
+        updateSpraying(pinching, nextPressure);
+        setTrackingLabel(pinching ? "SPRAYING" : gesture === "Open_Palm" ? "OPEN PALM" : "PINCH TO SPRAY");
+      }
+
+      if (gesture === "Open_Palm" && gestureScore > 0.72 && !pinching) {
+        if (!openPalmSinceRef.current) openPalmSinceRef.current = now;
+      } else {
+        openPalmSinceRef.current = 0;
+      }
+
+      if (modeRef.current === "paint" && gesture === "Thumb_Up" && gestureScore > 0.78 && !pinching) {
+        if (!thumbsUpSinceRef.current) thumbsUpSinceRef.current = now;
+        if (now - thumbsUpSinceRef.current > 900 && now > gestureCooldownRef.current) {
+          gestureCooldownRef.current = now + 3000;
+          thumbsUpSinceRef.current = 0;
+          saveArtwork();
+        }
+      } else {
+        thumbsUpSinceRef.current = 0;
+      }
+
+      if (now - lastUiUpdateRef.current > 34) {
+        setCursor({ ...pointerRef.current, visible: true });
+        setTelemetry((previous) => ({
+          ...previous,
+          trackingFps: Math.round(trackingFpsRef.current),
+          renderFps: renderFpsRef.current,
+          latencyMs: Math.round(now - result.capturedAt),
+          inferenceMs: Math.round(result.inferenceMs),
+          confidence: Math.round(gestureScore * 100),
+        }));
+        if (debugRef.current) drawDebugHand(landmarks);
+        lastUiUpdateRef.current = now;
+      }
+    },
+    [drawDebugHand, saveArtwork, setAppMode, showToast, updateSpraying],
+  );
+
   const stopCamera = useCallback(() => {
     if (trackingRafRef.current) cancelAnimationFrame(trackingRafRef.current);
     trackingRafRef.current = null;
-    recognizerRef.current?.close();
-    recognizerRef.current = null;
+    workerRef.current?.postMessage({ type: "close" });
+    workerRef.current?.terminate();
+    workerRef.current = null;
+    frameInFlightRef.current = false;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+    trackingPinchRef.current = false;
+    smoothedPointRef.current = null;
     updateSpraying(false);
   }, [updateSpraying]);
 
@@ -486,6 +759,10 @@ export default function Home() {
     setInputMode("camera");
     setAppMode("loading");
     setTrackingLabel("WARMING UP VISION");
+    setCalibrationStage(0);
+    calibrationSamplesRef.current = [];
+    calibrationBoundsRef.current = { minX: 0.08, maxX: 0.92, minY: 0.07, maxY: 0.91 };
+    calibrationPinchRef.current = false;
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera unavailable");
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -503,117 +780,71 @@ export default function Home() {
       video.srcObject = stream;
       await video.play();
 
-      const visionModule = await import("@mediapipe/tasks-vision");
-      const fileset = await visionModule.FilesetResolver.forVisionTasks("/mediapipe-wasm");
-      let recognizer: Recognizer;
-      try {
-        recognizer = (await visionModule.GestureRecognizer.createFromOptions(fileset, {
-          baseOptions: { modelAssetPath: "/models/gesture_recognizer.task", delegate: "GPU" },
-          runningMode: "VIDEO",
-          numHands: 1,
-          minHandDetectionConfidence: 0.55,
-          minHandPresenceConfidence: 0.55,
-          minTrackingConfidence: 0.5,
-        })) as Recognizer;
-      } catch {
-        recognizer = (await visionModule.GestureRecognizer.createFromOptions(fileset, {
-          baseOptions: { modelAssetPath: "/models/gesture_recognizer.task", delegate: "CPU" },
-          runningMode: "VIDEO",
-          numHands: 1,
-          minHandDetectionConfidence: 0.55,
-          minHandPresenceConfidence: 0.55,
-          minTrackingConfidence: 0.5,
-        })) as Recognizer;
-      }
-      recognizerRef.current = recognizer;
+      const worker = new Worker("/gesture-worker.js", { type: "module" });
+      workerRef.current = worker;
+      await new Promise<void>((resolve, reject) => {
+        const timeout = window.setTimeout(() => reject(new Error("Vision worker timed out")), 18000);
+        worker.onmessage = (event: MessageEvent<Record<string, unknown>>) => {
+          const message = event.data;
+          if (message.type === "ready") {
+            window.clearTimeout(timeout);
+            setTelemetry((previous) => ({ ...previous, delegate: String(message.delegate ?? "CPU") }));
+            resolve();
+            return;
+          }
+          if (message.type === "error") {
+            window.clearTimeout(timeout);
+            reject(new Error(String(message.message ?? "Vision worker failed")));
+            return;
+          }
+          if (message.type === "result") {
+            frameInFlightRef.current = false;
+            processTrackingResult(message as unknown as WorkerResult);
+            return;
+          }
+          if (message.type === "frame-error" || message.type === "frame-dropped") {
+            frameInFlightRef.current = false;
+          }
+        };
+        worker.onerror = () => {
+          window.clearTimeout(timeout);
+          reject(new Error("Vision worker crashed"));
+        };
+        worker.postMessage({ type: "init", origin: window.location.origin });
+      });
       setAppMode("calibrate");
-      setTrackingLabel("SHOW ME YOUR HAND");
+      setTrackingLabel("PINCH TOP LEFT");
 
       const loop = (time: number) => {
-        const activeRecognizer = recognizerRef.current;
+        const activeWorker = workerRef.current;
         const activeVideo = videoRef.current;
-        if (!activeRecognizer || !activeVideo) return;
+        if (!activeWorker || !activeVideo) return;
         if (
           activeVideo.readyState >= 2 &&
           activeVideo.currentTime !== lastVideoTimeRef.current &&
-          time - lastInferenceRef.current >= 32
+          time - lastInferenceRef.current >= 32 &&
+          !frameInFlightRef.current
         ) {
           lastInferenceRef.current = time;
           lastVideoTimeRef.current = activeVideo.currentTime;
-          try {
-            const result = activeRecognizer.recognizeForVideo(activeVideo, time);
-            const landmarks = result.landmarks[0];
-            if (landmarks) {
-              const tip = landmarks[8];
-              const thumb = landmarks[4];
-              const palm = Math.max(0.04, distance(landmarks[0], landmarks[9]));
-              const pinchRatio = distance(tip, thumb) / palm;
-              const nextPressure = clamp(1 - (pinchRatio - 0.1) / 0.36, 0.18, 1);
-              const currentlyPinching = sprayingRef.current;
-              const pinching = currentlyPinching ? pinchRatio < 0.48 : pinchRatio < 0.34;
-              const normalizedX = clamp(((1 - tip.x) - 0.08) / 0.84);
-              const normalizedY = clamp((tip.y - 0.07) / 0.84);
-              const target = {
-                x: normalizedX * window.innerWidth,
-                y: normalizedY * window.innerHeight,
-              };
-              const smoothing = 0.34;
-              pointerRef.current = pointerVisibleRef.current
-                ? {
-                    x: pointerRef.current.x + (target.x - pointerRef.current.x) * smoothing,
-                    y: pointerRef.current.y + (target.y - pointerRef.current.y) * smoothing,
-                  }
-                : target;
-              pointerVisibleRef.current = true;
-              palmScaleRef.current = clamp((palm - 0.13) / 0.18);
-              pressureRef.current = nextPressure;
-
-              const gesture = result.gestures[0]?.[0]?.categoryName ?? "None";
-              const gestureScore = result.gestures[0]?.[0]?.score ?? 0;
-              if (time - lastUiUpdateRef.current > 34) {
-                setCursor({ ...pointerRef.current, visible: true });
-                setTrackingLabel(pinching ? "SPRAYING" : gesture === "Open_Palm" ? "OPEN PALM" : "PINCH TO SPRAY");
-                lastUiUpdateRef.current = time;
-                if (debugRef.current) drawDebugHand(landmarks);
+          frameInFlightRef.current = true;
+          const capturedAt = performance.now();
+          void createImageBitmap(activeVideo)
+            .then((bitmap) => {
+              if (!workerRef.current) {
+                bitmap.close();
+                frameInFlightRef.current = false;
+                return;
               }
-
-              if (modeRef.current === "calibrate" && pinching) {
-                setAppMode("paint");
-                showToast("CAN PRIMED — MAKE A MARK");
-              }
-              if (modeRef.current === "paint") updateSpraying(pinching, nextPressure);
-
-              if (gesture === "Open_Palm" && gestureScore > 0.72 && !pinching) {
-                if (!openPalmSinceRef.current) openPalmSinceRef.current = time;
-              } else {
-                openPalmSinceRef.current = 0;
-              }
-
-              if (gesture === "Thumb_Up" && gestureScore > 0.78 && !pinching) {
-                if (!thumbsUpSinceRef.current) thumbsUpSinceRef.current = time;
-                if (
-                  time - thumbsUpSinceRef.current > 900 &&
-                  time > gestureCooldownRef.current
-                ) {
-                  gestureCooldownRef.current = time + 3000;
-                  thumbsUpSinceRef.current = 0;
-                  saveArtwork();
-                }
-              } else {
-                thumbsUpSinceRef.current = 0;
-              }
-            } else {
-              pointerVisibleRef.current = false;
-              updateSpraying(false);
-              if (time - lastUiUpdateRef.current > 180) {
-                setCursor((previous) => ({ ...previous, visible: false }));
-                setTrackingLabel("HAND OUT OF FRAME");
-                lastUiUpdateRef.current = time;
-              }
-            }
-          } catch {
-            setTrackingLabel("TRACKING RECOVERY");
-          }
+              workerRef.current.postMessage(
+                { type: "frame", bitmap, timestamp: capturedAt, capturedAt },
+                [bitmap],
+              );
+            })
+            .catch(() => {
+              frameInFlightRef.current = false;
+              setTrackingLabel("TRACKING RECOVERY");
+            });
         }
         trackingRafRef.current = requestAnimationFrame(loop);
       };
@@ -623,7 +854,7 @@ export default function Home() {
       setAppMode("error");
       setTrackingLabel("CAMERA BLOCKED");
     }
-  }, [drawDebugHand, ensureAudio, saveArtwork, setAppMode, showToast, stopCamera, updateSpraying]);
+  }, [ensureAudio, processTrackingResult, setAppMode, stopCamera]);
 
   const startPointerMode = useCallback(() => {
     stopCamera();
@@ -711,6 +942,9 @@ export default function Home() {
     showToast(next.name.toUpperCase());
   };
 
+  const activeCalibrationTarget =
+    CALIBRATION_TARGETS[Math.min(calibrationStage, CALIBRATION_TARGETS.length - 1)];
+
   return (
     <main
       className={`aircan mode-${mode} ${isSpraying ? "is-spraying" : ""}`}
@@ -721,6 +955,7 @@ export default function Home() {
     >
       <div className="wall" aria-hidden="true" />
       <canvas ref={canvasRef} className="paint-canvas" aria-label="Your digital graffiti wall" />
+      <canvas ref={effectsCanvasRef} className="effects-canvas" aria-hidden="true" />
       <div className="wall-grain" aria-hidden="true" />
 
       <video
@@ -736,13 +971,13 @@ export default function Home() {
         aria-hidden="true"
       />
 
-      {mode === "paint" && cursor.visible && (
+      {(mode === "paint" || mode === "calibrate") && cursor.visible && (
         <div
-          className={`nozzle ${isSpraying ? "active" : ""}`}
+          className={`nozzle ${isSpraying ? "active" : ""} ${mode === "calibrate" ? "calibration-cursor" : ""}`}
           style={{
             transform: `translate3d(${cursor.x}px, ${cursor.y}px, 0)`,
-            width: cap.size * 1.15,
-            height: cap.size * 1.15,
+            width: mode === "calibrate" ? 38 : cap.size * 1.15,
+            height: mode === "calibrate" ? 38 : cap.size * 1.15,
             "--paint": color.hex,
           } as React.CSSProperties}
           aria-hidden="true"
@@ -754,7 +989,7 @@ export default function Home() {
       <header className="topbar" data-ui>
         <div className="brand-lockup">
           <div className="brand">AIRCAN</div>
-          <div className="edition">DIGITAL WALL / 001</div>
+          <div className="edition">DIGITAL WALL / 002</div>
         </div>
         {mode === "paint" && (
           <div className="session-actions">
@@ -776,7 +1011,7 @@ export default function Home() {
 
       {mode === "intro" && (
         <section className="intro" data-ui>
-          <div className="intro-index">EXPERIMENT 001 / GESTURE + COLOR</div>
+          <div className="intro-index">EXPERIMENT 002 / GESTURE + COLOR</div>
           <div className="hero-copy">
             <p className="eyebrow"><span /> THE WALL IS LIVE</p>
             <h1><span>YOUR HAND.</span><span>THE WALL.</span><span>NO RULES.</span></h1>
@@ -816,16 +1051,31 @@ export default function Home() {
       )}
 
       {mode === "calibrate" && (
-        <section className="system-overlay calibrate" data-ui aria-live="polite">
-          <div className="hand-target" aria-hidden="true">
+        <section className="calibration-overlay" data-ui aria-live="polite">
+          <div
+            className="calibration-target"
+            style={{
+              left: `${activeCalibrationTarget.x * 100}%`,
+              top: `${activeCalibrationTarget.y * 100}%`,
+            }}
+            aria-hidden="true"
+          >
             <span className="target-ring ring-one" />
             <span className="target-ring ring-two" />
-            <span className="pinch-glyph">●&nbsp;&nbsp;●</span>
+            <span className="target-cross" />
+            <em>{activeCalibrationTarget.label}</em>
           </div>
-          <p className="system-kicker">HAND FOUND / CAN UNLOCKED</p>
-          <h2>PINCH TO<br />PRIME</h2>
-          <p className="system-note">Bring thumb and index finger together. Keep your hand in frame.</p>
-          <button type="button" className="text-cta" onClick={startPointerMode}>USE POINTER INSTEAD →</button>
+          <div className="calibration-hud">
+            <p className="system-kicker">CALIBRATION / {String(calibrationStage + 1).padStart(2, "0")} OF 04</p>
+            <h2>AIM. PINCH.<br />RELEASE.</h2>
+            <p className="system-note">Move the lime cursor onto the target, pinch once, then open your fingers for the next corner.</p>
+            <div className="calibration-progress" aria-label={`${calibrationStage} of 4 calibration points captured`}>
+              {CALIBRATION_TARGETS.map((target, index) => (
+                <span key={target.label} className={index < calibrationStage ? "complete" : index === calibrationStage ? "active" : ""} />
+              ))}
+            </div>
+            <button type="button" className="text-cta" onClick={startPointerMode}>USE POINTER INSTEAD →</button>
+          </div>
         </section>
       )}
 
@@ -856,6 +1106,21 @@ export default function Home() {
               {debug ? "HIDE TRACKING" : "SHOW TRACKING"} <kbd>D</kbd>
             </button>
           </aside>
+
+          {debug && (
+            <aside className="tracking-lab" data-ui aria-label="Live tracking diagnostics">
+              <div className="lab-heading"><span>TRACKING LAB</span><strong>LIVE</strong></div>
+              <dl>
+                <div><dt>TRACK</dt><dd>{telemetry.trackingFps || "—"} FPS</dd></div>
+                <div><dt>RENDER</dt><dd>{telemetry.renderFps || "—"} FPS</dd></div>
+                <div><dt>LATENCY</dt><dd>{telemetry.latencyMs || "—"} MS</dd></div>
+                <div><dt>INFERENCE</dt><dd>{telemetry.inferenceMs || "—"} MS</dd></div>
+                <div><dt>GESTURE</dt><dd>{telemetry.confidence || "—"}%</dd></div>
+                <div><dt>DELEGATE</dt><dd>{telemetry.delegate}</dd></div>
+              </dl>
+              <p>WORKER THREAD / PREDICTIVE FILTER / 4-POINT MAP</p>
+            </aside>
+          )}
 
           <section className="tool-dock" data-ui aria-label="Paint tools">
             <div className="color-tools">

@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "public/mediapipe-wasm/**",
+    "public/mediapipe/**",
+    "public/gesture-worker.js",
     "next-env.d.ts",
   ]),
   eslint.configs.recommended,

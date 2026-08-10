@@ -25,7 +25,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const host = requestHeaders.get("host") ?? "localhost:3000";
   const protocol = host.startsWith("localhost") || host.startsWith("127.0.0.1") ? "http" : "https";
   const origin = `${protocol}://${host}`;
-  const description = "Turn your hand into a digital spray can and paint the wall without touching the screen.";
+  const description = "A calibrated, predictive digital spray can powered by your hand — paint the wall without touching the screen.";
   return {
     metadataBase: new URL(origin),
     title: "AIRCAN — The Wall Is Live",
@@ -38,7 +38,7 @@ export async function generateMetadata(): Promise<Metadata> {
       title: "AIRCAN — The Wall Is Live",
       description,
       type: "website",
-      images: [{ url: `${origin}/og.png`, width: 1672, height: 941, alt: "AIRCAN — Your hand. The wall. No rules." }],
+      images: [{ url: `${origin}/og.png`, width: 1672, height: 941, alt: "AIRCAN 002 — Feel the wall." }],
     },
     twitter: {
       card: "summary_large_image",
