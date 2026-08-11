@@ -132,6 +132,8 @@ export default function Home() {
   const [commandMode, setCommandMode] = useState(false);
   const [commandPanel, setCommandPanel] = useState<CommandPanel>("root");
   const [commandHover, setCommandHover] = useState<string | null>(null);
+  const [commandPinchTarget, setCommandPinchTarget] = useState<string | null>(null);
+  const [commandPinchCharge, setCommandPinchCharge] = useState(0);
   const [gestureCharge, setGestureCharge] = useState(0);
   const [startupFailure, setStartupFailure] = useState<StartupFailure>({
     code: "CAM / 403",
@@ -190,6 +192,8 @@ export default function Home() {
   const commandPanelRef = useRef<CommandPanel>("root");
   const commandHoverRef = useRef<string | null>(null);
   const commandPinchRef = useRef(false);
+  const commandPinchSinceRef = useRef(0);
+  const commandPinchTargetRef = useRef<string | null>(null);
   const sprayReadyRef = useRef(true);
   const wetnessRef = useRef(0);
   const dripsRef = useRef<Drip[]>([]);
@@ -665,10 +669,14 @@ export default function Home() {
     commandPanelRef.current = "root";
     commandHoverRef.current = null;
     commandPinchRef.current = false;
+    commandPinchSinceRef.current = 0;
+    commandPinchTargetRef.current = null;
     sprayReadyRef.current = false;
     setCommandMode(true);
     setCommandPanel("root");
     setCommandHover(null);
+    setCommandPinchTarget(null);
+    setCommandPinchCharge(0);
     setGestureCharge(0);
     setTrackingLabel("COMMAND MODE / AIM + PINCH");
     playCommandCue("open");
@@ -680,11 +688,15 @@ export default function Home() {
     commandPanelRef.current = "root";
     commandHoverRef.current = null;
     commandPinchRef.current = false;
+    commandPinchSinceRef.current = 0;
+    commandPinchTargetRef.current = null;
     sprayReadyRef.current = false;
     fistSinceRef.current = 0;
     setCommandMode(false);
     setCommandPanel("root");
     setCommandHover(null);
+    setCommandPinchTarget(null);
+    setCommandPinchCharge(0);
     setGestureCharge(0);
     setTrackingLabel(inputMode === "camera" ? "PINCH TO SPRAY" : "HOLD TO SPRAY");
     playCommandCue("close");
@@ -805,6 +817,10 @@ export default function Home() {
         trackingPinchRef.current = false;
         calibrationPinchRef.current = false;
         commandPinchRef.current = false;
+        commandPinchSinceRef.current = 0;
+        commandPinchTargetRef.current = null;
+        setCommandPinchTarget(null);
+        setCommandPinchCharge(0);
         openPalmSinceRef.current = 0;
         openPalmLastSeenRef.current = 0;
         fistSinceRef.current = 0;
@@ -916,13 +932,42 @@ export default function Home() {
           .elementFromPoint(pointerRef.current.x, pointerRef.current.y)
           ?.closest<HTMLElement>("[data-command-id]")
           ?.dataset.commandId ?? null;
-        if (hit !== commandHoverRef.current) {
+        if (!commandPinchTargetRef.current && hit !== commandHoverRef.current) {
           commandHoverRef.current = hit;
           setCommandHover(hit);
         }
-        if (pinching && !commandPinchRef.current) activateCommand(commandHoverRef.current);
-        commandPinchRef.current = pinching;
-        setTrackingLabel(`COMMAND / ${commandPanelRef.current.toUpperCase()} / PINCH TO SELECT`);
+        if (pinching) {
+          if (!commandPinchRef.current && hit) {
+            commandPinchRef.current = true;
+            commandPinchSinceRef.current = now;
+            commandPinchTargetRef.current = hit;
+            setCommandPinchTarget(hit);
+            setCommandPinchCharge(0);
+          }
+
+          const target = commandPinchTargetRef.current;
+          if (target) {
+            const charge = clamp((now - commandPinchSinceRef.current) / 180);
+            setCommandPinchCharge(charge);
+            setTrackingLabel(`HOLD PINCH / ${Math.round(charge * 100)}% / RELEASE TO RESET`);
+            if (charge >= 1) {
+              commandPinchSinceRef.current = 0;
+              commandPinchTargetRef.current = null;
+              setCommandPinchTarget(null);
+              setCommandPinchCharge(0);
+              activateCommand(target);
+            }
+          } else {
+            setTrackingLabel(`COMMAND / ${commandPanelRef.current.toUpperCase()} / AIM AT A TARGET`);
+          }
+        } else {
+          commandPinchRef.current = false;
+          commandPinchSinceRef.current = 0;
+          commandPinchTargetRef.current = null;
+          setCommandPinchTarget(null);
+          setCommandPinchCharge(0);
+          setTrackingLabel(`COMMAND / ${commandPanelRef.current.toUpperCase()} / PINCH + HOLD`);
+        }
 
         if (gesture === "Closed_Fist" && gestureScore > 0.72 && !pinching) {
           if (!fistSinceRef.current) fistSinceRef.current = now;
@@ -1499,12 +1544,13 @@ export default function Home() {
                     "--command-x": `${50 + Math.cos(angle) * 40}%`,
                     "--command-y": `${50 + Math.sin(angle) * 40}%`,
                     "--command-color": item.swatch ?? (item.danger ? "#ff5c35" : "#dfff00"),
+                    "--commit": `${commandPinchTarget === item.id ? commandPinchCharge * 100 : 0}%`,
                   } as React.CSSProperties;
                   return (
                     <button
                       type="button"
                       key={item.id}
-                      className={`command-option ${commandHover === item.id ? "is-targeted" : ""} ${item.danger ? "is-danger" : ""} ${item.disabled ? "is-disabled" : ""}`}
+                      className={`command-option ${commandHover === item.id || commandPinchTarget === item.id ? "is-targeted" : ""} ${commandPinchTarget === item.id ? "is-committing" : ""} ${item.danger ? "is-danger" : ""} ${item.disabled ? "is-disabled" : ""}`}
                       data-command-id={item.id}
                       style={style}
                       onClick={() => activateCommand(item.id)}
@@ -1514,18 +1560,21 @@ export default function Home() {
                       {item.swatch && <span className="command-swatch" aria-hidden="true" />}
                       <strong>{item.label}</strong>
                       <small>{item.meta}</small>
+                      <i className="command-confirm-meter" aria-hidden="true" />
                     </button>
                   );
                 })}
                 <button
                   type="button"
-                  className={`command-core ${commandHover === (commandPanel === "root" ? "close" : commandPanel === "clear" ? "cancel-clear" : "back") ? "is-targeted" : ""}`}
+                  className={`command-core ${commandHover === (commandPanel === "root" ? "close" : commandPanel === "clear" ? "cancel-clear" : "back") || commandPinchTarget === (commandPanel === "root" ? "close" : commandPanel === "clear" ? "cancel-clear" : "back") ? "is-targeted" : ""} ${commandPinchTarget === (commandPanel === "root" ? "close" : commandPanel === "clear" ? "cancel-clear" : "back") ? "is-committing" : ""}`}
                   data-command-id={commandPanel === "root" ? "close" : commandPanel === "clear" ? "cancel-clear" : "back"}
+                  style={{ "--commit": `${commandPinchTarget === (commandPanel === "root" ? "close" : commandPanel === "clear" ? "cancel-clear" : "back") ? commandPinchCharge * 100 : 0}%` } as React.CSSProperties}
                   onClick={() => activateCommand(commandPanel === "root" ? "close" : commandPanel === "clear" ? "cancel-clear" : "back")}
                 >
                   <span>{commandPanel === "root" ? "OPEN PALM / LIVE" : "COMMAND / SUBMENU"}</span>
                   <strong>{commandTitle}</strong>
                   <small>{commandPanel === "root" ? "AIM + PINCH" : commandPanel === "clear" ? "FIST OR PINCH TO CANCEL" : "PINCH CENTER TO GO BACK"}</small>
+                  <i className="command-confirm-meter" aria-hidden="true" />
                 </button>
               </div>
               <div
@@ -1534,7 +1583,7 @@ export default function Home() {
               >
                 <span>CLOSED FIST</span><strong>EXIT</strong>
               </div>
-              <p className="command-help">PAINT LOCKED · MOVE TO AIM · PINCH TO SELECT</p>
+              <p className="command-help">PAINT LOCKED · AIM · PINCH + HOLD · RELEASE</p>
             </section>
           )}
 

@@ -55,6 +55,8 @@ test("ships the local hand model and removes the disposable starter", async () =
   assert.match(page, /COMMAND MODE/);
   assert.match(page, /hasOpenPalmShape/);
   assert.match(page, /openPalmLastSeenRef/);
+  assert.match(page, /commandPinchSinceRef/);
+  assert.match(page, /command-confirm-meter/);
   assert.match(page, /Closed_Fist/);
   assert.match(page, /Victory/);
   assert.match(page, /data-command-id/);
