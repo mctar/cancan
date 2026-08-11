@@ -84,6 +84,29 @@ const clamp = (value: number, min = 0, max = 1) =>
 const distance = (a: Landmark, b: Landmark) =>
   Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 
+const hasOpenPalmShape = (landmarks: Landmark[], palm: number, pinchRatio: number) => {
+  const wrist = landmarks[0];
+  const fingers = [
+    [8, 6, 5],
+    [12, 10, 9],
+    [16, 14, 13],
+    [20, 18, 17],
+  ];
+  const extendedFingers = fingers.filter(([tip, pip, mcp]) => {
+    const tipFromWrist = distance(landmarks[tip], wrist);
+    const pipFromWrist = distance(landmarks[pip], wrist);
+    const tipFromMcp = distance(landmarks[tip], landmarks[mcp]);
+    const pipFromMcp = distance(landmarks[pip], landmarks[mcp]);
+
+    return (
+      tipFromWrist > pipFromWrist + palm * 0.2 &&
+      tipFromMcp > pipFromMcp * 1.22
+    );
+  }).length;
+
+  return extendedFingers === 4 && pinchRatio > 0.58;
+};
+
 const rgb = (hex: string) => {
   const clean = hex.replace("#", "");
   return {
@@ -158,6 +181,7 @@ export default function Home() {
   const calibrationBoundsRef = useRef<CalibrationBounds>({ minX: 0.08, maxX: 0.92, minY: 0.07, maxY: 0.91 });
   const calibrationPinchRef = useRef(false);
   const openPalmSinceRef = useRef(0);
+  const openPalmLastSeenRef = useRef(0);
   const thumbsUpSinceRef = useRef(0);
   const victorySinceRef = useRef(0);
   const fistSinceRef = useRef(0);
@@ -782,6 +806,7 @@ export default function Home() {
         calibrationPinchRef.current = false;
         commandPinchRef.current = false;
         openPalmSinceRef.current = 0;
+        openPalmLastSeenRef.current = 0;
         fistSinceRef.current = 0;
         setGestureCharge(0);
         updateSpraying(false);
@@ -847,6 +872,10 @@ export default function Home() {
 
       const gesture = result.gestures[0]?.[0]?.categoryName ?? "None";
       const gestureScore = result.gestures[0]?.[0]?.score ?? 0;
+      const openPalmCandidate =
+        !pinching &&
+        ((gesture === "Open_Palm" && gestureScore > 0.48) ||
+          hasOpenPalmShape(landmarks, palm, pinchRatio));
 
       if (modeRef.current === "calibrate") {
         const stage = calibrationSamplesRef.current.length;
@@ -913,18 +942,26 @@ export default function Home() {
         const activeSpray = pinching && sprayReadyRef.current;
         updateSpraying(activeSpray, nextPressure);
 
-        if (gesture === "Open_Palm" && gestureScore > 0.72 && !pinching) {
+        if (openPalmCandidate) {
+          openPalmLastSeenRef.current = now;
           if (!openPalmSinceRef.current) openPalmSinceRef.current = now;
-          const charge = clamp((now - openPalmSinceRef.current) / 650);
+        }
+
+        const palmHoldActive =
+          openPalmSinceRef.current > 0 && now - openPalmLastSeenRef.current < 160;
+        if (palmHoldActive) {
+          const charge = clamp((now - openPalmSinceRef.current) / 550);
           setGestureCharge(charge);
           setTrackingLabel(charge > 0.05 ? "HOLD PALM / COMMAND MODE" : "OPEN PALM");
           if (charge >= 1 && now > gestureCooldownRef.current) {
             gestureCooldownRef.current = now + 900;
             openPalmSinceRef.current = 0;
+            openPalmLastSeenRef.current = 0;
             openCommandMode();
           }
         } else {
           openPalmSinceRef.current = 0;
+          openPalmLastSeenRef.current = 0;
           setGestureCharge(0);
           setTrackingLabel(activeSpray ? "SPRAYING" : "PINCH TO SPRAY");
         }
