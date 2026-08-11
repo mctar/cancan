@@ -34,11 +34,13 @@ test("server-renders the AIRCAN experience and social metadata", async () => {
 });
 
 test("ships the local hand model and removes the disposable starter", async () => {
-  const [page, worker, layout, packageJson] = await Promise.all([
+  const [page, worker, layout, packageJson, pagesHtml, pagesWorkflow] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../public/gesture-worker.js", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../github-pages/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/deploy-pages.yml", import.meta.url), "utf8"),
     access(new URL("../public/models/gesture_recognizer.task", import.meta.url)),
     access(new URL("../public/og.png", import.meta.url)),
   ]);
@@ -66,5 +68,8 @@ test("ships the local hand model and removes the disposable starter", async () =
   assert.match(layout, /generateMetadata/);
   assert.match(packageJson, /@mediapipe\/tasks-vision/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
+  assert.match(packageJson, /build:pages/);
+  assert.match(pagesHtml, /https:\/\/cancan\.btrbot\.com\//);
+  assert.match(pagesWorkflow, /actions\/deploy-pages@v4/);
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", templateRoot)));
 });
