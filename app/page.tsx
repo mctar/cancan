@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 type Mode = "intro" | "loading" | "calibrate" | "paint" | "error";
 type InputMode = "camera" | "pointer";
+type CommandPanel = "root" | "colors" | "caps" | "clear";
 type Point = { x: number; y: number };
 type Landmark = { x: number; y: number; z: number; visibility?: number };
 type GestureResult = {
@@ -38,6 +39,14 @@ type MistParticle = Point & {
   life: number;
   size: number;
   color: string;
+};
+type CommandItem = {
+  id: string;
+  label: string;
+  meta: string;
+  swatch?: string;
+  danger?: boolean;
+  disabled?: boolean;
 };
 
 const PALETTE = [
@@ -92,6 +101,10 @@ export default function Home() {
   const [confirmClear, setConfirmClear] = useState(false);
   const [toast, setToast] = useState("");
   const [calibrationStage, setCalibrationStage] = useState(0);
+  const [commandMode, setCommandMode] = useState(false);
+  const [commandPanel, setCommandPanel] = useState<CommandPanel>("root");
+  const [commandHover, setCommandHover] = useState<string | null>(null);
+  const [gestureCharge, setGestureCharge] = useState(0);
   const [telemetry, setTelemetry] = useState({
     trackingFps: 0,
     renderFps: 0,
@@ -136,7 +149,14 @@ export default function Home() {
   const calibrationPinchRef = useRef(false);
   const openPalmSinceRef = useRef(0);
   const thumbsUpSinceRef = useRef(0);
+  const victorySinceRef = useRef(0);
+  const fistSinceRef = useRef(0);
   const gestureCooldownRef = useRef(0);
+  const commandModeRef = useRef(false);
+  const commandPanelRef = useRef<CommandPanel>("root");
+  const commandHoverRef = useRef<string | null>(null);
+  const commandPinchRef = useRef(false);
+  const sprayReadyRef = useRef(true);
   const wetnessRef = useRef(0);
   const dripsRef = useRef<Drip[]>([]);
   const mistRef = useRef<MistParticle[]>([]);
@@ -252,6 +272,14 @@ export default function Home() {
     debugRef.current = debug;
   }, [debug]);
 
+  useEffect(() => {
+    commandModeRef.current = commandMode;
+  }, [commandMode]);
+
+  useEffect(() => {
+    commandPanelRef.current = commandPanel;
+  }, [commandPanel]);
+
   const checkpoint = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -284,13 +312,7 @@ export default function Home() {
     showToast("LAST MARK LIFTED");
   }, [showToast]);
 
-  const clearWall = useCallback(() => {
-    if (!confirmClear) {
-      setConfirmClear(true);
-      if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
-      clearTimerRef.current = setTimeout(() => setConfirmClear(false), 2600);
-      return;
-    }
+  const eraseWall = useCallback(() => {
     checkpoint();
     const canvas = canvasRef.current;
     const context = canvas?.getContext("2d");
@@ -302,7 +324,17 @@ export default function Home() {
     }
     setConfirmClear(false);
     showToast("FRESH WALL");
-  }, [checkpoint, confirmClear, showToast]);
+  }, [checkpoint, showToast]);
+
+  const clearWall = useCallback(() => {
+    if (!confirmClear) {
+      setConfirmClear(true);
+      if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
+      clearTimerRef.current = setTimeout(() => setConfirmClear(false), 2600);
+      return;
+    }
+    eraseWall();
+  }, [confirmClear, eraseWall]);
 
   const saveArtwork = useCallback(() => {
     const source = canvasRef.current;
@@ -342,13 +374,17 @@ export default function Home() {
     showToast("ARTWORK SAVED");
   }, [showToast]);
 
-  const toggleFullscreen = useCallback(() => {
-    if (!document.fullscreenElement) {
-      void document.documentElement.requestFullscreen();
-    } else {
-      void document.exitFullscreen();
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch {
+      showToast("FULLSCREEN NEEDS ONE CLICK");
     }
-  }, []);
+  }, [showToast]);
 
   const deposit = useCallback(
     (
@@ -568,6 +604,136 @@ export default function Home() {
     [setSprayAudio],
   );
 
+  const playCommandCue = useCallback(
+    (tone: "open" | "select" | "close" | "warn" = "select") => {
+      const rig = ensureAudio();
+      if (!rig) return;
+      const oscillator = rig.context.createOscillator();
+      const gain = rig.context.createGain();
+      const now = rig.context.currentTime;
+      const frequency = tone === "open" ? 620 : tone === "close" ? 310 : tone === "warn" ? 180 : 840;
+      oscillator.type = tone === "warn" ? "sawtooth" : "sine";
+      oscillator.frequency.setValueAtTime(frequency, now);
+      oscillator.frequency.exponentialRampToValueAtTime(Math.max(90, frequency * 1.18), now + 0.09);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.045, now + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.13);
+      oscillator.connect(gain).connect(rig.context.destination);
+      oscillator.start(now);
+      oscillator.stop(now + 0.14);
+    },
+    [ensureAudio],
+  );
+
+  const openCommandMode = useCallback(() => {
+    updateSpraying(false);
+    commandModeRef.current = true;
+    commandPanelRef.current = "root";
+    commandHoverRef.current = null;
+    commandPinchRef.current = false;
+    sprayReadyRef.current = false;
+    setCommandMode(true);
+    setCommandPanel("root");
+    setCommandHover(null);
+    setGestureCharge(0);
+    setTrackingLabel("COMMAND MODE / AIM + PINCH");
+    playCommandCue("open");
+  }, [playCommandCue, updateSpraying]);
+
+  const closeCommandMode = useCallback(() => {
+    updateSpraying(false);
+    commandModeRef.current = false;
+    commandPanelRef.current = "root";
+    commandHoverRef.current = null;
+    commandPinchRef.current = false;
+    sprayReadyRef.current = false;
+    fistSinceRef.current = 0;
+    setCommandMode(false);
+    setCommandPanel("root");
+    setCommandHover(null);
+    setGestureCharge(0);
+    setTrackingLabel(inputMode === "camera" ? "PINCH TO SPRAY" : "HOLD TO SPRAY");
+    playCommandCue("close");
+  }, [inputMode, playCommandCue, updateSpraying]);
+
+  const activateCommand = useCallback(
+    (id: string | null) => {
+      if (!id) {
+        showToast("AIM AT A COMMAND");
+        playCommandCue("warn");
+        return;
+      }
+      playCommandCue(id === "confirm-clear" ? "warn" : "select");
+      commandHoverRef.current = null;
+      setCommandHover(null);
+
+      if (id.startsWith("color:")) {
+        const index = Number(id.split(":")[1]);
+        const next = PALETTE[index];
+        if (next) {
+          setColor(next);
+          showToast(`${next.name.toUpperCase()} LOADED`);
+        }
+        closeCommandMode();
+        return;
+      }
+      if (id.startsWith("cap:")) {
+        const next = CAPS.find((option) => option.id === id.split(":")[1]);
+        if (next) {
+          setCap(next);
+          showToast(`${next.name.toUpperCase()} LOADED`);
+        }
+        closeCommandMode();
+        return;
+      }
+
+      switch (id) {
+        case "colors":
+          commandPanelRef.current = "colors";
+          setCommandPanel("colors");
+          break;
+        case "caps":
+          commandPanelRef.current = "caps";
+          setCommandPanel("caps");
+          break;
+        case "back":
+          commandPanelRef.current = "root";
+          setCommandPanel("root");
+          break;
+        case "undo":
+          if (historyRef.current.length) undo();
+          else showToast("NOTHING TO UNDO");
+          closeCommandMode();
+          break;
+        case "save":
+          saveArtwork();
+          closeCommandMode();
+          break;
+        case "clear":
+          commandPanelRef.current = "clear";
+          setCommandPanel("clear");
+          break;
+        case "confirm-clear":
+          eraseWall();
+          closeCommandMode();
+          break;
+        case "tracking":
+          setDebug((value) => !value);
+          closeCommandMode();
+          break;
+        case "fullscreen":
+          void toggleFullscreen();
+          closeCommandMode();
+          break;
+        case "close":
+        case "cancel-clear":
+          closeCommandMode();
+          break;
+      }
+    },
+    [closeCommandMode, eraseWall, playCommandCue, saveArtwork, showToast, toggleFullscreen, undo],
+  );
+
   const drawDebugHand = useCallback((landmarks: Landmark[]) => {
     const canvas = debugCanvasRef.current;
     if (!canvas) return;
@@ -604,6 +770,10 @@ export default function Home() {
         pointerVisibleRef.current = false;
         trackingPinchRef.current = false;
         calibrationPinchRef.current = false;
+        commandPinchRef.current = false;
+        openPalmSinceRef.current = 0;
+        fistSinceRef.current = 0;
+        setGestureCharge(0);
         updateSpraying(false);
         if (now - lastUiUpdateRef.current > 160) {
           setCursor((previous) => ({ ...previous, visible: false }));
@@ -701,18 +871,74 @@ export default function Home() {
           }
         }
         calibrationPinchRef.current = pinching;
+      } else if (modeRef.current === "paint" && commandModeRef.current) {
+        updateSpraying(false);
+        const hit = document
+          .elementFromPoint(pointerRef.current.x, pointerRef.current.y)
+          ?.closest<HTMLElement>("[data-command-id]")
+          ?.dataset.commandId ?? null;
+        if (hit !== commandHoverRef.current) {
+          commandHoverRef.current = hit;
+          setCommandHover(hit);
+        }
+        if (pinching && !commandPinchRef.current) activateCommand(commandHoverRef.current);
+        commandPinchRef.current = pinching;
+        setTrackingLabel(`COMMAND / ${commandPanelRef.current.toUpperCase()} / PINCH TO SELECT`);
+
+        if (gesture === "Closed_Fist" && gestureScore > 0.72 && !pinching) {
+          if (!fistSinceRef.current) fistSinceRef.current = now;
+          const charge = clamp((now - fistSinceRef.current) / 650);
+          setGestureCharge(charge);
+          if (charge >= 1 && now > gestureCooldownRef.current) {
+            gestureCooldownRef.current = now + 900;
+            closeCommandMode();
+          }
+        } else {
+          fistSinceRef.current = 0;
+          setGestureCharge(0);
+        }
       } else if (modeRef.current === "paint") {
-        updateSpraying(pinching, nextPressure);
-        setTrackingLabel(pinching ? "SPRAYING" : gesture === "Open_Palm" ? "OPEN PALM" : "PINCH TO SPRAY");
+        commandPinchRef.current = pinching;
+        if (!pinching) sprayReadyRef.current = true;
+        const activeSpray = pinching && sprayReadyRef.current;
+        updateSpraying(activeSpray, nextPressure);
+
+        if (gesture === "Open_Palm" && gestureScore > 0.72 && !pinching) {
+          if (!openPalmSinceRef.current) openPalmSinceRef.current = now;
+          const charge = clamp((now - openPalmSinceRef.current) / 650);
+          setGestureCharge(charge);
+          setTrackingLabel(charge > 0.05 ? "HOLD PALM / COMMAND MODE" : "OPEN PALM");
+          if (charge >= 1 && now > gestureCooldownRef.current) {
+            gestureCooldownRef.current = now + 900;
+            openPalmSinceRef.current = 0;
+            openCommandMode();
+          }
+        } else {
+          openPalmSinceRef.current = 0;
+          setGestureCharge(0);
+          setTrackingLabel(activeSpray ? "SPRAYING" : "PINCH TO SPRAY");
+        }
       }
 
-      if (gesture === "Open_Palm" && gestureScore > 0.72 && !pinching) {
-        if (!openPalmSinceRef.current) openPalmSinceRef.current = now;
+      if (
+        modeRef.current === "paint" &&
+        !commandModeRef.current &&
+        gesture === "Victory" &&
+        gestureScore > 0.76 &&
+        !pinching
+      ) {
+        if (!victorySinceRef.current) victorySinceRef.current = now;
+        if (now - victorySinceRef.current > 520 && now > gestureCooldownRef.current) {
+          gestureCooldownRef.current = now + 1400;
+          victorySinceRef.current = 0;
+          if (historyRef.current.length) undo();
+          else showToast("NOTHING TO UNDO");
+        }
       } else {
-        openPalmSinceRef.current = 0;
+        victorySinceRef.current = 0;
       }
 
-      if (modeRef.current === "paint" && gesture === "Thumb_Up" && gestureScore > 0.78 && !pinching) {
+      if (modeRef.current === "paint" && !commandModeRef.current && gesture === "Thumb_Up" && gestureScore > 0.78 && !pinching) {
         if (!thumbsUpSinceRef.current) thumbsUpSinceRef.current = now;
         if (now - thumbsUpSinceRef.current > 900 && now > gestureCooldownRef.current) {
           gestureCooldownRef.current = now + 3000;
@@ -737,7 +963,7 @@ export default function Home() {
         lastUiUpdateRef.current = now;
       }
     },
-    [drawDebugHand, saveArtwork, setAppMode, showToast, updateSpraying],
+    [activateCommand, closeCommandMode, drawDebugHand, openCommandMode, saveArtwork, setAppMode, showToast, undo, updateSpraying],
   );
 
   const stopCamera = useCallback(() => {
@@ -859,6 +1085,9 @@ export default function Home() {
   const startPointerMode = useCallback(() => {
     stopCamera();
     ensureAudio();
+    commandModeRef.current = false;
+    setCommandMode(false);
+    setCommandPanel("root");
     setInputMode("pointer");
     pointerVisibleRef.current = true;
     pointerRef.current = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
@@ -895,7 +1124,13 @@ export default function Home() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (modeRef.current !== "paint") return;
-      if (event.code === "Space" && inputMode === "pointer" && !event.repeat) {
+      if (event.key.toLowerCase() === "m" && !event.repeat) {
+        event.preventDefault();
+        if (commandModeRef.current) closeCommandMode();
+        else openCommandMode();
+      }
+      if (event.code === "Escape" && commandModeRef.current) closeCommandMode();
+      if (event.code === "Space" && inputMode === "pointer" && !event.repeat && !commandModeRef.current) {
         event.preventDefault();
         updateSpraying(true, 0.85);
       }
@@ -918,7 +1153,7 @@ export default function Home() {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [inputMode, saveArtwork, toggleFullscreen, undo, updateSpraying]);
+  }, [closeCommandMode, inputMode, openCommandMode, saveArtwork, toggleFullscreen, undo, updateSpraying]);
 
   useEffect(() => {
     return () => {
@@ -945,9 +1180,47 @@ export default function Home() {
   const activeCalibrationTarget =
     CALIBRATION_TARGETS[Math.min(calibrationStage, CALIBRATION_TARGETS.length - 1)];
 
+  const rootCommands: CommandItem[] = [
+    { id: "colors", label: "COLOR", meta: color.name.toUpperCase(), swatch: color.hex },
+    { id: "caps", label: "CAP", meta: cap.name.toUpperCase() },
+    { id: "undo", label: "UNDO", meta: canUndo ? "VICTORY SIGN" : "NO MARKS", disabled: !canUndo },
+    { id: "save", label: "SAVE ART", meta: "THUMBS UP" },
+    { id: "clear", label: "CLEAR", meta: "2-STEP", danger: true },
+    { id: "fullscreen", label: "FULLSCREEN", meta: "IMMERSIVE" },
+    { id: "tracking", label: "TRACKING LAB", meta: debug ? "VISIBLE" : "HIDDEN" },
+  ];
+  const colorCommands: CommandItem[] = PALETTE.map((paint, index) => ({
+    id: `color:${index}`,
+    label: paint.name.toUpperCase(),
+    meta: paint.hex.toUpperCase(),
+    swatch: paint.hex,
+  }));
+  const capCommands: CommandItem[] = CAPS.map((option) => ({
+    id: `cap:${option.id}`,
+    label: option.name.toUpperCase(),
+    meta: `${option.label} / ${option.kind.toUpperCase()}`,
+  }));
+  const clearCommands: CommandItem[] = [
+    { id: "confirm-clear", label: "ERASE WALL", meta: "PINCH AGAIN", danger: true },
+  ];
+  const commandItems = commandPanel === "root"
+    ? rootCommands
+    : commandPanel === "colors"
+      ? colorCommands
+      : commandPanel === "caps"
+        ? capCommands
+        : clearCommands;
+  const commandTitle = commandPanel === "root"
+    ? "COMMAND MODE"
+    : commandPanel === "colors"
+      ? "LOAD COLOR"
+      : commandPanel === "caps"
+        ? "LOAD CAP"
+        : "ERASE EVERYTHING?";
+
   return (
     <main
-      className={`aircan mode-${mode} ${isSpraying ? "is-spraying" : ""}`}
+      className={`aircan mode-${mode} ${isSpraying ? "is-spraying" : ""} ${commandMode ? "has-command-mode" : ""}`}
       onPointerMove={handlePointerMove}
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
@@ -973,11 +1246,11 @@ export default function Home() {
 
       {(mode === "paint" || mode === "calibrate") && cursor.visible && (
         <div
-          className={`nozzle ${isSpraying ? "active" : ""} ${mode === "calibrate" ? "calibration-cursor" : ""}`}
+          className={`nozzle ${isSpraying ? "active" : ""} ${mode === "calibrate" ? "calibration-cursor" : ""} ${commandMode ? "command-cursor" : ""}`}
           style={{
             transform: `translate3d(${cursor.x}px, ${cursor.y}px, 0)`,
-            width: mode === "calibrate" ? 38 : cap.size * 1.15,
-            height: mode === "calibrate" ? 38 : cap.size * 1.15,
+            width: mode === "calibrate" || commandMode ? 38 : cap.size * 1.15,
+            height: mode === "calibrate" || commandMode ? 38 : cap.size * 1.15,
             "--paint": color.hex,
           } as React.CSSProperties}
           aria-hidden="true"
@@ -989,10 +1262,18 @@ export default function Home() {
       <header className="topbar" data-ui>
         <div className="brand-lockup">
           <div className="brand">AIRCAN</div>
-          <div className="edition">DIGITAL WALL / 002</div>
+          <div className="edition">DIGITAL WALL / 003</div>
         </div>
         {mode === "paint" && (
           <div className="session-actions">
+            <button
+              type="button"
+              onClick={() => commandMode ? closeCommandMode() : openCommandMode()}
+              className={commandMode ? "command-active" : ""}
+              aria-label="Toggle gesture command mode"
+            >
+              <span>COMMANDS</span><kbd>M</kbd>
+            </button>
             <button type="button" onClick={undo} disabled={!canUndo} aria-label="Undo last stroke">
               <span>UNDO</span><kbd>⌘Z</kbd>
             </button>
@@ -1011,13 +1292,13 @@ export default function Home() {
 
       {mode === "intro" && (
         <section className="intro" data-ui>
-          <div className="intro-index">EXPERIMENT 002 / GESTURE + COLOR</div>
+          <div className="intro-index">EXPERIMENT 003 / ZERO-TOUCH CONTROL</div>
           <div className="hero-copy">
             <p className="eyebrow"><span /> THE WALL IS LIVE</p>
             <h1><span>YOUR HAND.</span><span>THE WALL.</span><span>NO RULES.</span></h1>
             <p className="lede">
-              Turn movement into aerosol. Aim with your index finger, pinch to paint,
-              and leave a mark without touching the screen.
+              Turn movement into aerosol. Pinch to paint, hold an open palm for Command Mode,
+              and run the whole wall without touching the screen.
             </p>
             <div className="intro-actions">
               <button type="button" className="primary-cta" onClick={startCamera}>
@@ -1034,7 +1315,7 @@ export default function Home() {
             <p className="coordinates">64.1466° N<br />21.9426° W</p>
           </div>
           <div className="hero-orbit" aria-hidden="true">
-            <span className="orbit-copy">MOVE / PINCH / SPRAY / REPEAT / </span>
+            <span className="orbit-copy">MOVE / PINCH / COMMAND / REPEAT / </span>
             <span className="hero-dot" />
           </div>
         </section>
@@ -1099,9 +1380,71 @@ export default function Home() {
             {trackingLabel}
           </div>
 
+          {inputMode === "camera" && !commandMode && gestureCharge > 0 && (
+            <div
+              className="gesture-charge"
+              data-ui
+              style={{ "--charge": `${gestureCharge * 360}deg` } as React.CSSProperties}
+              aria-label={`Command mode ${Math.round(gestureCharge * 100)} percent armed`}
+            >
+              <span>HOLD</span>
+              <strong>OPEN PALM</strong>
+            </div>
+          )}
+
+          {commandMode && (
+            <section className={`command-overlay panel-${commandPanel}`} data-ui aria-label={commandTitle}>
+              <div className="command-scrim" aria-hidden="true" />
+              <div className="command-wheel">
+                <div className="command-orbit" aria-hidden="true" />
+                {commandItems.map((item, index) => {
+                  const angle = -Math.PI / 2 + (index / commandItems.length) * Math.PI * 2;
+                  const style = {
+                    "--command-x": `${50 + Math.cos(angle) * 40}%`,
+                    "--command-y": `${50 + Math.sin(angle) * 40}%`,
+                    "--command-color": item.swatch ?? (item.danger ? "#ff5c35" : "#dfff00"),
+                  } as React.CSSProperties;
+                  return (
+                    <button
+                      type="button"
+                      key={item.id}
+                      className={`command-option ${commandHover === item.id ? "is-targeted" : ""} ${item.danger ? "is-danger" : ""} ${item.disabled ? "is-disabled" : ""}`}
+                      data-command-id={item.id}
+                      style={style}
+                      onClick={() => activateCommand(item.id)}
+                      aria-disabled={item.disabled}
+                    >
+                      <span className="command-index">{String(index + 1).padStart(2, "0")}</span>
+                      {item.swatch && <span className="command-swatch" aria-hidden="true" />}
+                      <strong>{item.label}</strong>
+                      <small>{item.meta}</small>
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  className={`command-core ${commandHover === (commandPanel === "root" ? "close" : commandPanel === "clear" ? "cancel-clear" : "back") ? "is-targeted" : ""}`}
+                  data-command-id={commandPanel === "root" ? "close" : commandPanel === "clear" ? "cancel-clear" : "back"}
+                  onClick={() => activateCommand(commandPanel === "root" ? "close" : commandPanel === "clear" ? "cancel-clear" : "back")}
+                >
+                  <span>{commandPanel === "root" ? "OPEN PALM / LIVE" : "COMMAND / SUBMENU"}</span>
+                  <strong>{commandTitle}</strong>
+                  <small>{commandPanel === "root" ? "AIM + PINCH" : commandPanel === "clear" ? "FIST OR PINCH TO CANCEL" : "PINCH CENTER TO GO BACK"}</small>
+                </button>
+              </div>
+              <div
+                className={`fist-exit ${gestureCharge > 0 ? "is-arming" : ""}`}
+                style={{ "--charge": `${gestureCharge * 360}deg` } as React.CSSProperties}
+              >
+                <span>CLOSED FIST</span><strong>EXIT</strong>
+              </div>
+              <p className="command-help">PAINT LOCKED · MOVE TO AIM · PINCH TO SELECT</p>
+            </section>
+          )}
+
           <aside className="gesture-guide" data-ui>
             <span className="guide-number">{inputMode === "camera" ? "01" : "MOUSE"}</span>
-            <p>{inputMode === "camera" ? "MOVE TO AIM" : "MOVE TO AIM"}<br />{inputMode === "camera" ? "PINCH TO SPRAY" : "HOLD TO SPRAY"}</p>
+            <p>MOVE TO AIM<br />{inputMode === "camera" ? "PINCH / SPRAY · PALM / COMMAND" : "HOLD / SPRAY · M / COMMAND"}</p>
             <button type="button" onClick={() => setDebug((value) => !value)}>
               {debug ? "HIDE TRACKING" : "SHOW TRACKING"} <kbd>D</kbd>
             </button>

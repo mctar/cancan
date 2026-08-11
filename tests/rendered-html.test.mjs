@@ -28,6 +28,7 @@ test("server-renders the AIRCAN experience and social metadata", async () => {
   assert.match(html, /NO RULES\./);
   assert.match(html, /START WITH CAMERA/);
   assert.match(html, /TRY WITH POINTER/);
+  assert.match(html, /ZERO-TOUCH CONTROL/);
   assert.match(html, /\/og\.png/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
 });
@@ -49,6 +50,10 @@ test("ships the local hand model and removes the disposable starter", async () =
   assert.match(page, /TRACKING LAB/);
   assert.match(page, /Splatter/);
   assert.match(page, /Marker/);
+  assert.match(page, /COMMAND MODE/);
+  assert.match(page, /Closed_Fist/);
+  assert.match(page, /Victory/);
+  assert.match(page, /data-command-id/);
   assert.match(page, /getUserMedia/);
   assert.match(page, /saveArtwork/);
   assert.match(layout, /generateMetadata/);

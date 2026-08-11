@@ -201,6 +201,11 @@ button:focus-visible {
   background: var(--acid);
 }
 
+.session-actions button.command-active {
+  color: #0b0b09;
+  background: var(--acid);
+}
+
 .session-actions button:disabled {
   opacity: .28;
   cursor: default;
@@ -749,6 +754,270 @@ kbd {
   cursor: pointer;
 }
 
+.gesture-charge {
+  position: absolute;
+  z-index: 32;
+  left: 50%;
+  top: 50%;
+  width: 132px;
+  height: 132px;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--ink);
+  background:
+    radial-gradient(circle, #10110e 0 61%, transparent 62%),
+    conic-gradient(var(--acid) var(--charge), rgba(255,255,255,.11) 0);
+  box-shadow: 0 0 54px rgba(223,255,0,.17);
+  font-family: var(--font-mono), monospace;
+  pointer-events: none;
+}
+
+.gesture-charge span {
+  color: var(--acid);
+  font-size: 7px;
+  letter-spacing: 1.5px;
+}
+
+.gesture-charge strong {
+  margin-top: 6px;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.command-overlay {
+  position: absolute;
+  z-index: 34;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.command-scrim {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at center, rgba(20,21,18,.38) 0 24%, rgba(4,5,4,.82) 76%),
+    linear-gradient(rgba(223,255,0,.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(223,255,0,.025) 1px, transparent 1px);
+  background-size: auto, 5vw 5vw, 5vw 5vw;
+  backdrop-filter: blur(7px) saturate(.65);
+}
+
+.command-wheel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(690px, 78vmin);
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  font-family: var(--font-mono), monospace;
+}
+
+.command-orbit {
+  position: absolute;
+  inset: 12%;
+  border: 1px solid rgba(223,255,0,.17);
+  border-radius: 50%;
+  box-shadow: 0 0 80px rgba(223,255,0,.04), inset 0 0 80px rgba(0,0,0,.34);
+}
+
+.command-orbit::before,
+.command-orbit::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -5%;
+  width: 1px;
+  height: 110%;
+  background: linear-gradient(transparent, rgba(223,255,0,.11), transparent);
+}
+
+.command-orbit::after { transform: rotate(90deg); }
+
+.command-option {
+  position: absolute;
+  left: var(--command-x);
+  top: var(--command-y);
+  width: clamp(116px, 16vmin, 164px);
+  min-height: 72px;
+  transform: translate(-50%, -50%);
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-content: center;
+  gap: 4px 8px;
+  padding: 11px 12px;
+  border: 1px solid rgba(255,255,255,.18);
+  color: rgba(242,243,236,.72);
+  background: rgba(8,9,8,.92);
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 12px 32px rgba(0,0,0,.34);
+  transition: color .13s ease, border-color .13s ease, background .13s ease, transform .13s ease, box-shadow .13s ease;
+}
+
+.command-index {
+  grid-row: 1 / 3;
+  color: var(--command-color);
+  font-size: 7px;
+  letter-spacing: .5px;
+}
+
+.command-option strong {
+  overflow: hidden;
+  font-size: clamp(9px, 1.25vmin, 13px);
+  font-weight: 600;
+  letter-spacing: .8px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.command-option small {
+  overflow: hidden;
+  color: rgba(255,255,255,.36);
+  font-size: 6px;
+  letter-spacing: .75px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.command-option.is-danger { --command-color: #ff5c35; }
+.command-option.is-disabled { opacity: .44; }
+
+.command-option.is-targeted,
+.command-option:hover,
+.command-option:focus-visible {
+  color: #0b0b09;
+  border-color: var(--command-color);
+  background: var(--command-color);
+  transform: translate(-50%, -50%) scale(1.1);
+  box-shadow: 0 0 0 4px rgba(255,255,255,.08), 0 0 42px color-mix(in srgb, var(--command-color) 34%, transparent);
+}
+
+.command-option.is-targeted small,
+.command-option:hover small,
+.command-option:focus-visible small,
+.command-option.is-targeted .command-index,
+.command-option:hover .command-index,
+.command-option:focus-visible .command-index {
+  color: rgba(0,0,0,.58);
+}
+
+.command-swatch {
+  position: absolute;
+  right: 9px;
+  top: 9px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--command-color);
+  box-shadow: 0 0 13px color-mix(in srgb, var(--command-color) 60%, transparent);
+}
+
+.command-core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: clamp(156px, 23vmin, 220px);
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  border: 1px solid rgba(223,255,0,.55);
+  border-radius: 50%;
+  color: var(--ink);
+  background: radial-gradient(circle, rgba(34,36,29,.98), rgba(7,8,7,.98));
+  font-family: var(--font-mono), monospace;
+  text-align: center;
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 0 70px rgba(0,0,0,.56), inset 0 0 30px rgba(223,255,0,.045);
+  transition: transform .14s ease, background .14s ease, color .14s ease;
+}
+
+.command-core span {
+  color: var(--acid);
+  font-size: 6px;
+  letter-spacing: 1.5px;
+}
+
+.command-core strong {
+  margin: 10px 0 8px;
+  font-family: var(--font-display), Impact, sans-serif;
+  font-size: clamp(20px, 3.2vmin, 34px);
+  font-weight: 400;
+  line-height: .88;
+  letter-spacing: -.045em;
+}
+
+.command-core small {
+  color: rgba(255,255,255,.42);
+  font-size: 6px;
+  letter-spacing: .9px;
+}
+
+.command-core.is-targeted,
+.command-core:hover {
+  color: #0b0b09;
+  background: var(--acid);
+  transform: translate(-50%, -50%) scale(1.06);
+}
+
+.command-core.is-targeted span,
+.command-core.is-targeted small,
+.command-core:hover span,
+.command-core:hover small { color: rgba(0,0,0,.58); }
+
+.command-help {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  margin: 0;
+  color: rgba(242,243,236,.5);
+  font: 500 8px var(--font-mono), monospace;
+  letter-spacing: 1.35px;
+}
+
+.fist-exit {
+  position: absolute;
+  right: 34px;
+  bottom: 28px;
+  width: 82px;
+  height: 82px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, #11120f 0 61%, transparent 62%),
+    conic-gradient(var(--acid) var(--charge), rgba(255,255,255,.12) 0);
+  font: 500 6px var(--font-mono), monospace;
+  letter-spacing: .7px;
+}
+
+.fist-exit strong { margin-top: 4px; color: var(--acid); font-size: 8px; }
+
+.panel-clear .command-orbit { border-color: rgba(255,92,53,.35); }
+.panel-clear .command-core { border-color: rgba(255,92,53,.56); }
+
+.has-command-mode .tool-dock,
+.has-command-mode .gesture-guide,
+.has-command-mode .tracking-lab,
+.has-command-mode .session-actions {
+  opacity: .12;
+  filter: blur(2px);
+  pointer-events: none;
+}
+
 .tracking-lab {
   position: absolute;
   z-index: 30;
@@ -987,6 +1256,14 @@ kbd {
   box-shadow: 0 0 28px rgba(223,255,0,.36), inset 0 0 14px rgba(223,255,0,.18);
 }
 
+.nozzle.command-cursor {
+  z-index: 45;
+  border-width: 2px;
+  border-color: var(--acid);
+  background: rgba(223,255,0,.1);
+  box-shadow: 0 0 0 8px rgba(223,255,0,.06), 0 0 30px rgba(223,255,0,.42);
+}
+
 .camera-feed,
 .debug-landmarks {
   position: absolute;
@@ -1170,6 +1447,21 @@ kbd {
     bottom: 226px;
     width: 160px;
   }
+
+  .command-wheel {
+    width: min(620px, 91vmin);
+  }
+
+  .command-option {
+    width: clamp(94px, 18vmin, 126px);
+    min-height: 62px;
+    padding: 8px;
+  }
+
+  .command-option small { display: none; }
+  .command-core { width: clamp(132px, 25vmin, 174px); }
+  .command-help { bottom: 14px; font-size: 6px; }
+  .fist-exit { right: 14px; bottom: 12px; width: 64px; height: 64px; }
 
   .tracking-lab dl {
     grid-template-columns: 1fr;
