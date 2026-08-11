@@ -44,6 +44,8 @@ test("ships the local hand model and removes the disposable starter", async () =
   ]);
 
   assert.match(worker, /GestureRecognizer\.createFromOptions/);
+  assert.match(worker, /forVisionTasks\([^)]*, true\)/);
+  assert.match(worker, /modelAssetBuffer/);
   assert.match(worker, /recognizeForVideo/);
   assert.match(page, /gesture-worker\.js/);
   assert.match(page, /CALIBRATION_TARGETS/);
@@ -54,6 +56,7 @@ test("ships the local hand model and removes the disposable starter", async () =
   assert.match(page, /Closed_Fist/);
   assert.match(page, /Victory/);
   assert.match(page, /data-command-id/);
+  assert.match(page, /VISION \/ INIT/);
   assert.match(page, /getUserMedia/);
   assert.match(page, /saveArtwork/);
   assert.match(layout, /generateMetadata/);

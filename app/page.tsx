@@ -48,6 +48,11 @@ type CommandItem = {
   danger?: boolean;
   disabled?: boolean;
 };
+type StartupFailure = {
+  code: string;
+  kicker: string;
+  detail: string;
+};
 
 const PALETTE = [
   { name: "Voltage", hex: "#dfff00" },
@@ -105,6 +110,11 @@ export default function Home() {
   const [commandPanel, setCommandPanel] = useState<CommandPanel>("root");
   const [commandHover, setCommandHover] = useState<string | null>(null);
   const [gestureCharge, setGestureCharge] = useState(0);
+  const [startupFailure, setStartupFailure] = useState<StartupFailure>({
+    code: "CAM / 403",
+    kicker: "CAMERA ACCESS DIDN'T OPEN",
+    detail: "Allow camera access in your browser, or paint with your pointer right now.",
+  });
   const [telemetry, setTelemetry] = useState({
     trackingFps: 0,
     renderFps: 0,
@@ -982,6 +992,11 @@ export default function Home() {
 
   const startCamera = useCallback(async () => {
     ensureAudio();
+    setStartupFailure({
+      code: "CAM / START",
+      kicker: "STARTING CAMERA",
+      detail: "Opening the camera and preparing on-device hand tracking.",
+    });
     setInputMode("camera");
     setAppMode("loading");
     setTrackingLabel("WARMING UP VISION");
@@ -989,6 +1004,7 @@ export default function Home() {
     calibrationSamplesRef.current = [];
     calibrationBoundsRef.current = { minX: 0.08, maxX: 0.92, minY: 0.07, maxY: 0.91 };
     calibrationPinchRef.current = false;
+    let startupStage: "camera" | "video" | "vision" = "camera";
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera unavailable");
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -1000,12 +1016,14 @@ export default function Home() {
           facingMode: "user",
         },
       });
+      startupStage = "video";
       streamRef.current = stream;
       const video = videoRef.current;
       if (!video) throw new Error("Video surface unavailable");
       video.srcObject = stream;
       await video.play();
 
+      startupStage = "vision";
       const worker = new Worker("/gesture-worker.js", { type: "module" });
       workerRef.current = worker;
       await new Promise<void>((resolve, reject) => {
@@ -1032,9 +1050,9 @@ export default function Home() {
             frameInFlightRef.current = false;
           }
         };
-        worker.onerror = () => {
+        worker.onerror = (event) => {
           window.clearTimeout(timeout);
-          reject(new Error("Vision worker crashed"));
+          reject(new Error(event.message || "Vision worker crashed"));
         };
         worker.postMessage({ type: "init", origin: window.location.origin });
       });
@@ -1075,10 +1093,51 @@ export default function Home() {
         trackingRafRef.current = requestAnimationFrame(loop);
       };
       trackingRafRef.current = requestAnimationFrame(loop);
-    } catch {
+    } catch (error) {
+      const name = error instanceof DOMException ? error.name : "";
+      const message = error instanceof Error ? error.message : "Unknown startup error";
+      const permissionDenied = name === "NotAllowedError" || name === "SecurityError";
+      const cameraBusy = name === "NotReadableError" || name === "AbortError";
+      const noCamera = name === "NotFoundError" || name === "DevicesNotFoundError";
+      const failure = startupStage === "vision"
+        ? {
+            code: "VISION / INIT",
+            kicker: "HAND TRACKING DIDN'T START",
+            detail: message,
+          }
+        : startupStage === "video"
+          ? {
+              code: "VIDEO / PLAY",
+              kicker: "CAMERA OPENED, VIDEO STALLED",
+              detail: message,
+            }
+          : permissionDenied
+            ? {
+                code: "CAM / DENIED",
+                kicker: "CAMERA PERMISSION WAS DENIED",
+                detail: "Allow camera access for this site, then try again.",
+              }
+            : cameraBusy
+              ? {
+                  code: "CAM / BUSY",
+                  kicker: "CAMERA IS IN USE",
+                  detail: "Quit other camera apps, wait a moment, then try again.",
+                }
+              : noCamera
+                ? {
+                    code: "CAM / MISSING",
+                    kicker: "NO CAMERA WAS FOUND",
+                    detail: "Connect or enable a camera, then try again.",
+                  }
+                : {
+                    code: "CAM / ERROR",
+                    kicker: "CAMERA DIDN'T START",
+                    detail: message,
+                  };
+      setStartupFailure(failure);
       stopCamera();
       setAppMode("error");
-      setTrackingLabel("CAMERA BLOCKED");
+      setTrackingLabel(failure.code);
     }
   }, [ensureAudio, processTrackingResult, setAppMode, stopCamera]);
 
@@ -1362,10 +1421,10 @@ export default function Home() {
 
       {mode === "error" && (
         <section className="system-overlay error-panel" data-ui>
-          <div className="error-code">CAM / 403</div>
-          <p className="system-kicker">CAMERA ACCESS DIDN&apos;T OPEN</p>
+          <div className="error-code">{startupFailure.code}</div>
+          <p className="system-kicker">{startupFailure.kicker}</p>
           <h2>THE WALL<br />STILL WORKS.</h2>
-          <p className="system-note">Allow camera access in your browser, or paint with your pointer right now.</p>
+          <p className="system-note">{startupFailure.detail}</p>
           <div className="intro-actions">
             <button type="button" className="primary-cta" onClick={startCamera}>TRY CAMERA AGAIN <span>↗</span></button>
             <button type="button" className="text-cta" onClick={startPointerMode}>USE POINTER →</button>

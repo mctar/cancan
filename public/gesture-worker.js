@@ -5,7 +5,15 @@ let recognizer = null;
 const send = (message) => self.postMessage(message);
 
 async function initialize(origin) {
-  const fileset = await FilesetResolver.forVisionTasks(`${origin}/mediapipe-wasm`);
+  // Module workers cannot execute MediaPipe's classic importScripts loader.
+  // Request the ES module WASM loader explicitly, as required by the official
+  // worker implementation.
+  const fileset = await FilesetResolver.forVisionTasks(`${origin}/mediapipe-wasm`, true);
+  const modelResponse = await fetch(`${origin}/models/gesture_recognizer.task`);
+  if (!modelResponse.ok) {
+    throw new Error(`Gesture model failed to load (${modelResponse.status})`);
+  }
+  const modelBuffer = await modelResponse.arrayBuffer();
   const sharedOptions = {
     runningMode: "VIDEO",
     numHands: 1,
@@ -18,7 +26,7 @@ async function initialize(origin) {
     recognizer = await GestureRecognizer.createFromOptions(fileset, {
       ...sharedOptions,
       baseOptions: {
-        modelAssetPath: `${origin}/models/gesture_recognizer.task`,
+        modelAssetBuffer: new Uint8Array(modelBuffer.slice(0)),
         delegate: "GPU",
       },
     });
@@ -27,7 +35,7 @@ async function initialize(origin) {
     recognizer = await GestureRecognizer.createFromOptions(fileset, {
       ...sharedOptions,
       baseOptions: {
-        modelAssetPath: `${origin}/models/gesture_recognizer.task`,
+        modelAssetBuffer: new Uint8Array(modelBuffer.slice(0)),
         delegate: "CPU",
       },
     });
