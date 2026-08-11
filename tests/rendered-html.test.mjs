@@ -23,12 +23,11 @@ test("server-renders the AIRCAN experience and social metadata", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>AIRCAN — The Wall Is Live<\/title>/i);
-  assert.match(html, /YOUR HAND\./);
-  assert.match(html, /THE WALL\./);
-  assert.match(html, /NO RULES\./);
+  assert.match(html, /ZERO-TOUCH DIGITAL SPRAY WALL/);
+  assert.match(html, /YOUR HAND IS THE CAN/);
+  assert.match(html, /SYSTEM READY/);
   assert.match(html, /START WITH CAMERA/);
   assert.match(html, /TRY WITH POINTER/);
-  assert.match(html, /ZERO-TOUCH CONTROL/);
   assert.match(html, /\/og\.png/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
 });
@@ -59,6 +58,8 @@ test("ships the local hand model and removes the disposable starter", async () =
   assert.match(page, /openPalmLastSeenRef/);
   assert.match(page, /commandPinchSinceRef/);
   assert.match(page, /command-confirm-meter/);
+  assert.match(page, /latest-loading/);
+  assert.match(page, /latest-art/);
   assert.match(page, /Closed_Fist/);
   assert.match(page, /Victory/);
   assert.match(page, /data-command-id/);

@@ -1432,15 +1432,13 @@ export default function Home() {
       </header>
 
       {mode === "intro" && (
-        <section className="intro" data-ui>
-          <div className="intro-index">EXPERIMENT 003 / ZERO-TOUCH CONTROL</div>
-          <div className="hero-copy">
-            <p className="eyebrow"><span /> THE WALL IS LIVE</p>
-            <h1><span>YOUR HAND.</span><span>THE WALL.</span><span>NO RULES.</span></h1>
-            <p className="lede">
-              Turn movement into aerosol. Pinch to paint, hold an open palm for Command Mode,
-              and run the whole wall without touching the screen.
-            </p>
+        <section className="intro intro-latest" data-ui>
+          <div className="latest-art" aria-hidden="true" />
+          <h1 className="sr-only">AIRCAN — ZERO-TOUCH DIGITAL SPRAY WALL</h1>
+          <div className="latest-launch">
+            <p className="latest-status"><span /> AIRCAN / SYSTEM READY</p>
+            <p className="latest-prompt">YOUR HAND IS THE CAN.</p>
+            <p className="latest-note">Pinch to paint · open palm for Command Mode · video stays on this device</p>
             <div className="intro-actions">
               <button type="button" className="primary-cta" onClick={startCamera}>
                 <span>START WITH CAMERA</span><span className="cta-arrow">↗</span>
@@ -1450,25 +1448,16 @@ export default function Home() {
               </button>
             </div>
           </div>
-          <div className="intro-foot">
-            <p><strong>PRIVATE BY DESIGN</strong><br />VIDEO STAYS ON THIS DEVICE</p>
-            <p><strong>NO INSTALL</strong><br />CAMERA + ONE HAND</p>
-            <p className="coordinates">64.1466° N<br />21.9426° W</p>
-          </div>
-          <div className="hero-orbit" aria-hidden="true">
-            <span className="orbit-copy">MOVE / PINCH / COMMAND / REPEAT / </span>
-            <span className="hero-dot" />
-          </div>
         </section>
       )}
 
       {mode === "loading" && (
-        <section className="system-overlay" data-ui aria-live="polite">
+        <section className="system-overlay latest-loading" data-ui aria-live="polite">
           <div className="scanner"><span /><span /><span /></div>
-          <p className="system-kicker">INITIALIZING ON-DEVICE VISION</p>
-          <h2>WAKING UP<br />THE CAN</h2>
+          <p className="system-kicker">AIRCAN / INITIALIZING ON-DEVICE VISION</p>
+          <h2>ARMING<br />THE WALL</h2>
           <div className="load-track"><span /></div>
-          <p className="system-note">Camera frames are processed here. Nothing is uploaded.</p>
+          <p className="system-note">Camera frames stay on this device. Get one hand ready.</p>
         </section>
       )}
 
