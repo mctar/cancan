@@ -33,8 +33,9 @@ test("server-renders the AIRCAN experience and social metadata", async () => {
 });
 
 test("ships the local hand model and removes the disposable starter", async () => {
-  const [page, worker, layout, packageJson, pagesHtml, pagesWorkflow] = await Promise.all([
+  const [page, styles, worker, layout, packageJson, pagesHtml, pagesWorkflow] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../public/gesture-worker.js", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -60,6 +61,8 @@ test("ships the local hand model and removes the disposable starter", async () =
   assert.match(page, /command-confirm-meter/);
   assert.match(page, /latest-loading/);
   assert.match(page, /latest-art/);
+  assert.match(styles, /url\("\/og\.png"\) center \/ contain no-repeat/);
+  assert.match(styles, /\.mode-intro \.topbar/);
   assert.match(page, /Closed_Fist/);
   assert.match(page, /Victory/);
   assert.match(page, /data-command-id/);
