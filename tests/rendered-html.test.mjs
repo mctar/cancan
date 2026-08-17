@@ -16,19 +16,19 @@ async function render() {
   );
 }
 
-test("server-renders the AIRCAN experience and social metadata", async () => {
+test("server-renders the SPRAY COLLECTIVE experience and social metadata", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>AIRCAN — The Wall Is Live<\/title>/i);
+  assert.match(html, /<title>SPRAY COLLECTIVE — The Wall Is Live<\/title>/i);
   assert.match(html, /ZERO-TOUCH DIGITAL SPRAY WALL/);
   assert.match(html, /YOUR HAND IS THE CAN/);
   assert.match(html, /SYSTEM READY/);
   assert.match(html, /START WITH CAMERA/);
   assert.match(html, /TRY WITH POINTER/);
-  assert.match(html, /\/og\.png/);
+  assert.match(html, /\/hero-spray-collective\.png/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
 });
 
@@ -42,7 +42,7 @@ test("ships the local hand model and removes the disposable starter", async () =
     readFile(new URL("../github-pages/index.html", import.meta.url), "utf8"),
     readFile(new URL("../.github/workflows/deploy-pages.yml", import.meta.url), "utf8"),
     access(new URL("../public/models/gesture_recognizer.task", import.meta.url)),
-    access(new URL("../public/og.png", import.meta.url)),
+    access(new URL("../public/hero-spray-collective.png", import.meta.url)),
   ]);
 
   assert.match(worker, /GestureRecognizer\.createFromOptions/);
@@ -61,7 +61,7 @@ test("ships the local hand model and removes the disposable starter", async () =
   assert.match(page, /command-confirm-meter/);
   assert.match(page, /latest-loading/);
   assert.match(page, /latest-art/);
-  assert.match(styles, /url\("\/og\.png"\) center \/ contain no-repeat/);
+  assert.match(styles, /url\("\/hero-spray-collective\.png"\) center \/ contain no-repeat/);
   assert.match(styles, /\.mode-intro \.topbar/);
   assert.match(page, /Closed_Fist/);
   assert.match(page, /Victory/);

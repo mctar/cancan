@@ -28,23 +28,23 @@ export async function generateMetadata(): Promise<Metadata> {
   const description = "A zero-touch digital spray wall — paint, choose tools, undo, save, and command the whole experience with one hand.";
   return {
     metadataBase: new URL(origin),
-    title: "AIRCAN — The Wall Is Live",
+    title: "SPRAY COLLECTIVE — The Wall Is Live",
     description,
     icons: {
       icon: "/favicon.png",
       shortcut: "/favicon.png",
     },
     openGraph: {
-      title: "AIRCAN — The Wall Is Live",
+      title: "SPRAY COLLECTIVE — The Wall Is Live",
       description,
       type: "website",
-      images: [{ url: `${origin}/og.png`, width: 1672, height: 941, alt: "AIRCAN 003 — Zero-touch command mode." }],
+      images: [{ url: `${origin}/hero-spray-collective.png`, width: 1672, height: 941, alt: "SPRAY COLLECTIVE — Zero-touch command mode." }],
     },
     twitter: {
       card: "summary_large_image",
-      title: "AIRCAN — The Wall Is Live",
+      title: "SPRAY COLLECTIVE — The Wall Is Live",
       description,
-      images: [`${origin}/og.png`],
+      images: [`${origin}/hero-spray-collective.png`],
     },
   };
 }

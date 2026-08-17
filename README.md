@@ -1,6 +1,6 @@
-# AIRCAN — Digital Spray Wall
+# SPRAY COLLECTIVE — Digital Spray Wall
 
-A zero-touch digital spray-can experience. AIRCAN uses the webcam and local
+A zero-touch digital spray-can experience. SPRAY COLLECTIVE uses the webcam and local
 MediaPipe hand tracking to let people paint, switch tools, undo, save, and
 operate the command wheel with gestures.
 

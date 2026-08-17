@@ -404,9 +404,9 @@ export default function Home() {
     context.fillStyle = "rgba(255,255,255,.5)";
     context.font = `600 ${Math.max(16, output.width * 0.011)}px Arial`;
     context.letterSpacing = "3px";
-    context.fillText("AIRCAN / DIGITAL WALL", output.width * 0.025, output.height * 0.955);
+    context.fillText("SPRAY COLLECTIVE / DIGITAL WALL", output.width * 0.025, output.height * 0.955);
     const link = document.createElement("a");
-    link.download = `aircan-${new Date().toISOString().slice(0, 10)}.png`;
+    link.download = `spray-collective-${new Date().toISOString().slice(0, 10)}.png`;
     link.href = output.toDataURL("image/png");
     link.click();
     showToast("ARTWORK SAVED");
@@ -1402,7 +1402,7 @@ export default function Home() {
 
       <header className="topbar" data-ui>
         <div className="brand-lockup">
-          <div className="brand">AIRCAN</div>
+          <div className="brand">SPRAY COLLECTIVE</div>
           <div className="edition">DIGITAL WALL / 003</div>
         </div>
         {mode === "paint" && (
@@ -1434,9 +1434,9 @@ export default function Home() {
       {mode === "intro" && (
         <section className="intro intro-latest" data-ui>
           <div className="latest-art" aria-hidden="true" />
-          <h1 className="sr-only">AIRCAN — ZERO-TOUCH DIGITAL SPRAY WALL</h1>
+          <h1 className="sr-only">SPRAY COLLECTIVE — ZERO-TOUCH DIGITAL SPRAY WALL</h1>
           <div className="latest-launch">
-            <p className="latest-status"><span /> AIRCAN / SYSTEM READY</p>
+            <p className="latest-status"><span /> SPRAY COLLECTIVE / SYSTEM READY</p>
             <p className="latest-prompt">YOUR HAND IS THE CAN.</p>
             <p className="latest-note">Pinch to paint · open palm for Command Mode · video stays on this device</p>
             <div className="intro-actions">
@@ -1454,7 +1454,7 @@ export default function Home() {
       {mode === "loading" && (
         <section className="system-overlay latest-loading" data-ui aria-live="polite">
           <div className="scanner"><span /><span /><span /></div>
-          <p className="system-kicker">AIRCAN / INITIALIZING ON-DEVICE VISION</p>
+          <p className="system-kicker">SPRAY COLLECTIVE / INITIALIZING ON-DEVICE VISION</p>
           <h2>ARMING<br />THE WALL</h2>
           <div className="load-track"><span /></div>
           <p className="system-note">Camera frames stay on this device. Get one hand ready.</p>
